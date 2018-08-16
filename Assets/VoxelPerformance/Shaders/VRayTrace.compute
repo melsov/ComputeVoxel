@@ -1,0 +1,50 @@
+﻿// VoxelPerformance/Shaders/MeshGeneration.compute
+// Copyright 2016 Charles Griffiths
+
+#include "ChunkConstants.cginc"
+#include "HilbertFunctions.cginc"
+
+#define EmptyVoxel 0
+
+// #pragma kernel VRayTrace
+
+// #include "ChunkConstants.cginc"
+
+// StructuredBuffer<uint> Voxels;
+
+// uint voxelAt(int3 pos){
+	
+// }
+
+// #define TRACE_DISPATCH_GROUPS_X 16
+// #define TRACE_DISPATCH_GROUPS_Y 12
+
+// #define TRACE_GROUP_SIZE_X 8
+// #define TRACE_GROUP_SIZE_Y 8
+
+// #define TRACES float2(TRACE_DISPATCH_GROUPS_X * TRACE_GROUP_SIZE_X, TRACE_DISPATCH_GROUPS_Y * TRACE_GROUP_SIZE_Y)
+
+// struct NearClipData
+// {
+//     float nearClipDistance;
+//     float2 nearClipWidthHeight; 
+// };
+
+// NearClipData _nearClipData;
+// float3 _camPos;
+// float3 _camDir;
+// float4x4 _camRoMatrix;
+
+// [numthreads(TRACE_GROUP_SIZE_X, TRACE_GROUP_SIZE_Y, 1)]
+// void VRayTrace(uint3 dtid : SV_DispatchThreadID) 
+// {
+// 	float2 nearClipPos = dtid.xy / TRACES - .5;
+// 	nearClipPos *= _nearClipData.nearClipWidthHeight;
+// 	float3 d3 = float3(nearClipPos, _nearClipData.nearClipDistance) - _camPos;
+// 	float4 dif = _camRoMatrix * float4(d3, 1); 
+
+// 	dif = normalize(dif);
+// }
+
+
+

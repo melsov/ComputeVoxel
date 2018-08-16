@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="Windows-1252"?>
+<MetaData xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <Dirty>false</Dirty>
+  <LODBufferLengths>
+    <int>15226</int>
+    <int>3758</int>
+    <int>913</int>
+  </LODBufferLengths>
+</MetaData>

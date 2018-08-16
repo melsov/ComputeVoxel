@@ -1,0 +1,27 @@
+﻿// VoxelPerformance/Shaders/PerlinGeneration.compute
+// Portions of the following shader program having to do with Perlin Noise are licensed as described below.
+// All other sections are Copyright 2016 Charles Griffiths
+
+#pragma kernel TestCBuffer
+
+#include "UnityCG.cginc"
+
+CBUFFER_START(myTestCBuffers)
+	StructuredBuffer<uint> cBuff;
+	float4 farray[512];
+CBUFFER_END
+
+RWStructuredBuffer<uint> outBuff;
+
+
+[numthreads(8, 8, 8)]
+void TestCBuffer(uint3 dtid : SV_DispatchThreadID)
+{
+
+	int index = (dtid.z * 8 + dtid.x) * 8 + dtid.y; 
+
+	uint ui = farray[index] + cBuff[index];
+	outBuff[index] = ui + 1;
+
+}
+

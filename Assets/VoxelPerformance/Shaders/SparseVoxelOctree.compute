@@ -1,0 +1,194 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel ConstructHilbertIndices
+
+#include "HilbertFunctions.cginc"
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> tex;
+
+#define MAX_DEPTH 3
+
+struct OTNode{
+	uint pm; 
+};
+
+struct LeafVoxel
+{
+	uint voxel;
+};
+
+RWStructuredBuffer<OTNode> tree;
+
+//need RW to DecrementCounter ??
+RWStructuredBuffer<uint> ShownVoxels; 
+RWStructuredBuffer<uint> hilbertIndices;
+
+struct HilbertLODIndexRange
+{
+	uint count;
+};
+RWStructuredBuffer<HilbertLODIndexRange> hIndexRanges;
+
+//??RWStructuredBuffer<uint> hilbertIndicesLOD4;
+
+int getPointer(OTNode node) {
+	return (node.pm / 131072) & 32768; // top 15 bits
+}
+
+uint getValidMask(OTNode node) {
+	return (node.pm / 256) & 256;
+}
+
+uint getIsLeafMask(OTNode node) {
+	return node.pm & 256;
+}
+
+bool childIsLeaf(OTNode node, uint index) {
+	int result = ((node.pm & 256) / pow(2, index));
+	return result & 1;
+}
+
+bool childIsValid(OTNode node, uint index) {
+	int result = ((((node.pm / 256) & 256) / pow(2, index) )); 
+	return result & 1;
+}
+
+struct AxisAlignedCube {
+	float3 min, max;
+};
+
+AxisAlignedCube getAACube(float3 origin, float3 dir) {
+	AxisAlignedCube aac;
+	return aac;
+}
+
+LeafVoxel cast(float3 origin, float3 direction) {
+	LeafVoxel lv;
+	return lv;
+}
+
+//
+// Construct tree
+// for each ShownVoxel 
+// Assume Hilbert Sorted ?
+// Or ensure that pointers are compact enough to store 8 per node
+// descend to MAX_DEPTH
+//  setting nodes along the way
+// nodes have averages (can be calculated from leaves)
+//
+
+// bool isDifferentHilbertCube(uint prevVoxel, uint nextVoxel) {
+// 	uint3 p, n;
+// 	p.x = (prevVoxel / 65536) & 255;
+// 	p.y = (prevVoxel / 256) & 255;
+// 	p.z = prevVoxel & 256;
+
+// 	n.x = (nextVoxel / 65536) & 255;
+// 	n.y = (nextVoxel / 256) & 255;
+// 	n.z = nextVoxel & 255;
+
+// 	p /= 2;
+// 	n /= 2;
+
+// 	return p.x != n.x || p.y != n.y || p.z != n.z;
+// }
+
+//#define USE_LOD_4
+
+#ifdef USE_LOD_4
+
+//ShownVoxels are hilbert sorted
+[numthreads(1,1,1)]
+void ConstructHilbertIndices(uint dtid : SV_DispatchThreadID) 
+{
+	uint count = ShownVoxels.DecrementCounter();
+
+	uint prevVoxel, nextVoxel;
+	uint prevSize4Voxel;
+
+	uint hindex4RangeCount = 0, hindex2RangeCount = 0;
+
+	hilbertIndices[hilbertIndices.IncrementCounter() ] = 0;
+
+	prevVoxel = prevSize4Voxel = ShownVoxels[0];
+
+	uint i;
+	for(i = 1; i < count; ++i){
+		nextVoxel = ShownVoxels[i];
+		if(isDifferentHilbertCube(prevSize4Voxel, nextVoxel, 4)) {
+			hilbertIndices[hilbertIndices.IncrementCounter()] = i;
+			prevSize4Voxel = nextVoxel;
+			hindex4RangeCount++;
+		}
+	}
+
+	prevVoxel = prevSize4Voxel = ShownVoxels[0];
+
+	for(i = 1; i < count; ++i){
+		nextVoxel = ShownVoxels[i];
+
+		if(isDifferentHilbertCube(prevSize4Voxel, nextVoxel, 4)) {
+			prevSize4Voxel = nextVoxel;
+			prevVoxel = nextVoxel;
+		}
+		else if(isDifferentHilbertCube(prevVoxel, nextVoxel, 2))  {
+			hilbertIndices[hilbertIndices.IncrementCounter() ] = i;
+			prevVoxel = nextVoxel;
+			hindex2RangeCount++;
+		}
+	}
+
+	//CONSIDER: this obviates the hilbert counter?
+	hIndexRanges[0].count = count;
+	hIndexRanges[1].count = hindex4RangeCount + hindex2RangeCount;
+	hIndexRanges[2].count = hindex4RangeCount;
+
+}
+
+#else
+
+//ShownVoxels are hilbert sorted
+[numthreads(1,1,1)]
+void ConstructHilbertIndices(uint dtid : SV_DispatchThreadID) 
+{
+	uint count = ShownVoxels.DecrementCounter();
+	uint prevVoxel, nextVoxel;
+
+	uint hindex2RangeCount = 0;
+
+	hilbertIndices[hilbertIndices.IncrementCounter() ] = 0;
+
+	prevVoxel = ShownVoxels[0];
+	for(uint i = 1; i < count; ++i){
+		nextVoxel = ShownVoxels[i];
+
+		if(isDifferentHilbertCube(prevVoxel, nextVoxel, 2))  {
+			hilbertIndices[hilbertIndices.IncrementCounter() ] = i;
+			prevVoxel = nextVoxel;
+			hindex2RangeCount++;
+		}
+		
+	}
+	hIndexRanges[0].count = count;
+	hIndexRanges[1].count = hindex2RangeCount;
+}
+
+#endif
+
+
+struct CamData{
+	float4 position;
+	float4 nearClipLL;
+	float4 nearClipUR;
+};
+
+StructuredBuffer<CamData> _camData;
+
+// [numthreads(8,8,1)]
+// void RaycastTree (uint3 id : SV_DispatchThreadID)
+// {
+
+
+// 	tex[id.xy] = float4(id.x & id.y, (id.x & 15)/15.0, (id.y & 15)/15.0, 0.0);
+// }

@@ -1,0 +1,413 @@
+﻿// VoxelPerformance/Shaders/MeshGeneration.compute
+// Copyright 2016 Charles Griffiths
+
+#include "ChunkConstants.cginc"
+#include "VoxelHelper.cginc"
+
+
+// // #pragma kernel ExposedMip64
+#pragma kernel ExposedVoxels
+#pragma kernel ExposedVoxelsLOD2
+#pragma kernel ExposedVoxelsLOD4
+
+
+#pragma kernel FaceSum
+#pragma kernel FaceCopy
+#pragma kernel GetFaces
+
+
+
+
+
+StructuredBuffer<uint> MapVoxels;
+StructuredBuffer<uint> MapVoxelsLOD2;
+StructuredBuffer<uint> MapVoxelsLOD4;
+
+StructuredBuffer<uint> MapHeights;
+
+RWStructuredBuffer<uint> ShownVoxelCount;
+RWStructuredBuffer<uint> ShownVoxelOffset;
+
+
+
+RWStructuredBuffer<uint> ShownVoxels;
+RWStructuredBuffer<uint> ShownVoxelsLOD2;
+RWStructuredBuffer<uint> ShownVoxelsLOD4;
+
+RWStructuredBuffer<uint> TotalVoxelsPerLODCount;
+
+
+RWStructuredBuffer<uint> SolidVoxels;
+RWStructuredBuffer<uint> SolidVoxelsLOD2;
+RWStructuredBuffer<uint> SolidVoxelsLOD4;
+
+uint facesForVoxel(uint x, uint y, uint z);
+
+
+int getEnvelopeVoxel(uint x, uint y, uint z){
+	return 0; //TODO
+}
+
+int getVoxel(uint x, uint y, uint z)
+{
+	uint voxels = MapVoxels[(z * CHUNK_DIM_Z + x) * MAP_DATA_DIM_Y + y / 4]; // four voxels per int
+	return 
+    (0 == (y % 4)) * ((voxels / (256 * 256 * 256)) % 256) +
+		(1 == (y % 4)) * ((voxels / (256 * 256)) % 256) +
+		(2 == (y % 4)) * ((voxels / 256) % 256) +
+		(3 == (y % 4)) * (voxels % 256);
+}
+
+int getEncodedVoxelLOD2(uint x, uint y, uint z) { return MapVoxelsLOD2[(x * CHUNK_DIM_Y / 2 + y) * CHUNK_DIM_Z / 2 + z]; }
+
+int getEncodedVoxelLOD4(uint x, uint y, uint z) { return MapVoxelsLOD4[(x * CHUNK_DIM_Y / 4 + y) * CHUNK_DIM_Z / 4 + z]; }
+
+
+int getVoxelLOD2(uint x, uint y, uint z)
+{
+	return decodeVoxelID(MapVoxelsLOD2[(x * CHUNK_DIM_Y / 2 + y) * CHUNK_DIM_Z / 2 + z]);
+}
+
+int getVoxelLOD4(uint x, uint y, uint z)
+{
+	return decodeVoxelID( MapVoxelsLOD4[(x * CHUNK_DIM_Y / 4 + y) * CHUNK_DIM_Z / 4 + z]);
+}
+
+
+[numthreads(CHUNK_THREADS_X, CHUNK_THREADS_Y, CHUNK_THREADS_Z)]
+void ExposedVoxels(uint3 dtid : SV_DispatchThreadID)
+{
+	uint x, y, z;
+	x = dtid.x % CHUNK_DIM_X; 
+	y = dtid.y % CHUNK_DIM_Y;
+	z = dtid.z % CHUNK_DIM_Z; 
+
+	bool edge = (0 == x || 0 == z || CHUNK_DIM_X - 1 == x || CHUNK_DIM_Z - 1 == z || y == 0 || y == CHUNK_DIM_Y - 1);
+	uint voxelid = getVoxel(x, y, z);
+
+#ifdef TEST_SHOW_ALL
+	int shownIndex = ShownVoxels.IncrementCounter();
+	ShownVoxels[shownIndex] = ((voxelid * 256 + x) * 256 + y) * 256 + z;
+
+#else
+	if (EmptyVoxel != voxelid)
+	{
+		if (edge 
+
+			|| (0 != y && EmptyVoxel == getVoxel(x, y - 1, z))
+			|| EmptyVoxel == getVoxel(x, y, z + 1) || EmptyVoxel == getVoxel(x, y, z - 1)
+			|| EmptyVoxel == getVoxel(x + 1, y, z) || EmptyVoxel == getVoxel(x - 1, y, z)
+			|| EmptyVoxel == getVoxel(x, y + 1, z)
+
+			)
+		{
+
+			ShownVoxels[ShownVoxels.IncrementCounter()] = encodeVoxelPosition(voxelid, x, y, z); 
+
+		}
+	} 
+
+#endif
+}
+
+
+[numthreads(CHUNK_THREADS_X, CHUNK_THREADS_Y, CHUNK_THREADS_Z)]
+void ExposedVoxelsLOD2(uint3 dtid : SV_DispatchThreadID)
+{
+	uint x, y, z;
+	x = dtid.x % (CHUNK_DIM_X / 2); 
+	y = dtid.y % (CHUNK_DIM_Y / 2);
+	z = dtid.z % (CHUNK_DIM_Z / 2); 
+
+	bool edge = (0 == x || 0 == z || CHUNK_DIM_X / 2 - 1 == x || CHUNK_DIM_Z / 2 - 1 == z || y == 0 || y == CHUNK_DIM_Y / 2 - 1);
+	uint voxelid = getVoxelLOD2(x, y, z);
+
+#ifdef TEST_SHOW_ALL
+	int shownIndex = ShownVoxelsLOD2.IncrementCounter();
+	ShownVoxelsLOD2[shownIndex] = getEncodedVoxelLOD2(x,y,z); 
+
+#else
+	if (EmptyVoxel != voxelid)
+	{
+		if (edge 
+
+			|| (0 != y && EmptyVoxel == getVoxelLOD2(x, y - 1, z))
+			|| EmptyVoxel == getVoxelLOD2(x, y, z + 1) || EmptyVoxel == getVoxelLOD2(x, y, z - 1)
+			|| EmptyVoxel == getVoxelLOD2(x + 1, y, z) || EmptyVoxel == getVoxelLOD2(x - 1, y, z)
+			|| EmptyVoxel == getVoxelLOD2(x, y + 1, z)
+
+			)
+		{
+
+			ShownVoxelsLOD2[ShownVoxelsLOD2.IncrementCounter()] = getEncodedVoxelLOD2(x,y,z); 
+
+		}
+	} 
+
+#endif
+}
+
+[numthreads(CHUNK_THREADS_X, CHUNK_THREADS_Y, CHUNK_THREADS_Z)]
+void ExposedVoxelsLOD4(uint3 dtid : SV_DispatchThreadID)
+{
+	uint x, y, z;
+	x = dtid.x % (CHUNK_DIM_X / 4); 
+	y = dtid.y % (CHUNK_DIM_Y / 4);
+	z = dtid.z % (CHUNK_DIM_Z / 4); 
+
+	bool edge = (0 == x || 0 == z || CHUNK_DIM_X / 4 - 1 == x || CHUNK_DIM_Z / 4 - 1 == z || y == 0 || y == CHUNK_DIM_Y / 4 - 1);
+	uint voxelid = getVoxelLOD4(x, y, z);
+
+#ifdef TEST_SHOW_ALL
+
+	ShownVoxelsLOD4[ShownVoxelsLOD4.IncrementCounter()] = getEncodedVoxelLOD4(x,y,z); 
+
+#else
+	if (EmptyVoxel != voxelid)
+	{
+		if (edge 
+
+			|| (0 != y && EmptyVoxel == getVoxelLOD4(x, y - 1, z))
+			|| EmptyVoxel == getVoxelLOD4(x, y, z + 1) || EmptyVoxel == getVoxelLOD4(x, y, z - 1)
+			|| EmptyVoxel == getVoxelLOD4(x + 1, y, z) || EmptyVoxel == getVoxelLOD4(x - 1, y, z)
+			|| EmptyVoxel == getVoxelLOD4(x, y + 1, z)
+
+			)
+		{
+			ShownVoxelsLOD4[ShownVoxelsLOD4.IncrementCounter()] = getEncodedVoxelLOD4(x,y,z);
+		}
+	} 
+
+#endif
+}
+
+
+
+
+
+
+RWStructuredBuffer<uint> TotalVoxelCount;
+
+// Compute offsets into a tightly packed array
+// First offset is always zero but store it anyway
+[numthreads(1, 1, 1)]
+void FaceSum(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID)
+{
+	uint sum = 0;
+
+#ifdef INTERLEAVE_DISPLAY_COLUMNS
+
+  uint m,i;
+  for(m = 0; m < MIP_LEVELS; ++m) {
+    for(i = m; i < COLUMNS_PER_CHUNK; i += MIP_LEVELS) {
+      ShownVoxelOffset[m * (COLUMNS_PER_CHUNK / MIP_LEVELS) + i / MIP_LEVELS] = sum;
+      sum += ShownVoxelCount[i];
+    }
+  } 
+
+
+#else
+
+	for (uint i = 0; i < COLUMNS_PER_CHUNK; i++)
+	{
+		ShownVoxelOffset[i] = sum;
+		sum += ShownVoxelCount[i];
+	}
+
+#endif
+
+	TotalVoxelCount[0] = sum;
+}
+
+// #define DEBUG_COLORS
+// Copy one column of voxels into a tightly packed array
+
+// [numthreads(CHUNK_THREADS_X, CHUNK_THREADS_Y, CHUNK_THREADS_Z)]
+// void FaceCopy(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID)
+// {
+// 	// tid is { 0..31, 0, 0..31 }
+// 	// gid is { 0..7, 0, 0..7 }
+
+// 	uint column = (gid.z * CHUNK_THREADS_Z + tid.z) * CHUNK_DIM_Z + gid.x * CHUNK_THREADS_X + tid.x;
+
+// #ifdef INTERLEAVE_DISPLAY_COLUMNS 
+
+//   uint offIndex =  (column / MIP_LEVELS) + (column % MIP_LEVELS) * (uint(COLUMNS_PER_CHUNK) / MIP_LEVELS);
+
+// #else
+
+//   uint offIndex = column;
+  
+// #endif  
+
+// 	int solidoffset;
+// 	int voxelposition = column * CHUNK_DIM_Y;
+
+// 	solidoffset = ShownVoxelOffset[offIndex]; //  column];
+
+// 	for (int i = ShownVoxelCount[column] - 1; i >= 0; i--) {
+// #ifdef DEBUG_COLORS
+// 		SolidVoxels[solidoffset + i] = ((tid.x + tid.z) % 4) * 16777216 + ShownVoxels[voxelposition + i] % 16777216;
+// #else
+// 		SolidVoxels[solidoffset + i] = ShownVoxels[voxelposition + i];
+// #endif
+// 	}
+// }
+
+
+RWStructuredBuffer<uint> hilbertIndices;
+RWStructuredBuffer<uint> outHilbertIndices;
+RWStructuredBuffer<uint> outHilbertIndicesLOD4;
+RWStructuredBuffer<uint> SolidFaces;
+
+//
+// Copy Shown To SolidVoxels
+// Add hilbertIndices where appropriate
+// Copy hilbertIndices to outHilbertIndices
+//
+//
+// Wait probs with doing hilbertI and outHilbertI in one kernel
+// We need to know how many hilbertI we have first
+// [numthreads(1,1,1)]
+// void FaceCopy(uint dtid : SV_DispatchThreadID) 
+// {
+// 	uint count = ShownVoxels.DecrementCounter();
+
+// 	uint prevVoxel, nextVoxel;
+// 	int hindexCount = 0;
+// 	hilbertIndices[hilbertIndices.IncrementCounter() ] = 0;
+// 	prevVoxel = ShownVoxels[0];
+
+
+// 	for(uint i = 0; i < count; ++i){
+// 		SolidVoxels[i] = ShownVoxels[i];
+// 		nextVoxel = ShownVoxels[i];
+
+// 		if(isDifferentHilbertCube(prevVoxel, nextVoxel))  {
+// 			hilbertIndices[hilbertIndices.IncrementCounter() ] = i;
+// 			prevVoxel = nextVoxel;
+// 		}
+// 	}
+
+// 	count = hindexCount; // hilbertIndices.IncrementCounter();
+// 	for(uint j = 0; j < count; ++j) {
+// 		outHilbertIndices[j] = hilbertIndices[j];
+// 	}
+// }
+
+
+
+[numthreads(1,1,1)]
+void FaceCopy(uint dtid : SV_DispatchThreadID) 
+{
+	// TODO: we're getting one missing voxel per chunk sometimes
+	// try using a count buffer in the face Gen (Exposed Voxel) HilbertFunctions
+	// instead of DecrementCounter();
+
+	uint count = TotalVoxelsPerLODCount[0]; // ShownVoxels.DecrementCounter();
+	uint i;
+	for(i = 0; i < count; ++i){
+		SolidVoxels[i] = ShownVoxels[i];
+	}
+
+	count = TotalVoxelsPerLODCount[1]; // ShownVoxelsLOD2.DecrementCounter();
+	for(i = 0; i < count; ++i){
+		SolidVoxelsLOD2[i] = ShownVoxelsLOD2[i];
+	}
+
+	count = TotalVoxelsPerLODCount[2]; // ShownVoxelsLOD4.DecrementCounter();
+	for(i = 0; i < count; ++i){
+		SolidVoxelsLOD4[i] = ShownVoxelsLOD4[i];
+	}
+
+
+
+	// count = hilbertIndices.DecrementCounter();
+	// for(uint j = 0; j < count; ++j) {
+	// 	outHilbertIndices[j] = hilbertIndices[j];
+	// }
+}
+
+
+// [numthreads(1,1,1)]
+// void HilbertLOD4Copy(uint dtid : SV_DispatchThreadID) 
+// {
+
+// 	int count = hilbertIndices.DecrementCounter();
+// 	for(uint j = 0; j < count; ++j) {
+// 		outHilbertIndicesLOD4[j] = hilbertIndices[j];
+// 	}
+// }
+
+
+
+
+
+
+
+
+// ShownVoxels are hilbert sorted
+// [numthreads(1,1,1)]
+// void ConstructHilbertIndices(uint dtid : SV_DispatchThreadID) 
+// {
+// 	uint count = ShownVoxels.DecrementCounter();
+
+// 	uint prevVoxel, nextVoxel;
+// 	hilbertIndices[hilbertIndices.IncrementCounter() ] = 0;
+
+// 	prevVoxel = ShownVoxels[0];
+// 	for(uint i = 1; i < count; ++i){
+// 		nextVoxel = ShownVoxels[i];
+
+// 		if(isDifferentHilbertCube(prevVoxel, nextVoxel))  {
+// 			hilbertIndices[hilbertIndices.IncrementCounter() ] = i;
+// 			prevVoxel = nextVoxel;
+// 		}
+		
+// 	}
+// }
+
+
+
+
+// For each voxel, replace voxel id with data about visible faces
+//
+// Used only for mesh generation??? 
+//
+[numthreads(32, 1, 32)]
+void GetFaces(uint3 tid : SV_GroupThreadID, uint3 gid : SV_GroupID)
+{
+
+	return; // TEST are we using this
+
+
+  // tid is { 0..31, 0, 0..31 }
+  // gid is { 0..n, 0, 0 }
+	uint voxelposition = (gid.x * 32 + tid.z) * 32 + tid.x;
+
+	if (voxelposition >= TotalVoxelCount[0]) return;
+
+	uint x, y, z, voxeldata;
+	uint voxel = SolidVoxels[voxelposition];
+	uint faces = voxel % 0x1000000;
+
+	z = voxel % 256;
+
+	voxel /= 256;
+	y = voxel % 256;
+
+	voxel /= 256;
+	x = voxel % 256;
+
+	if (0 == x || EmptyVoxel == getVoxel(x - 1, y, z)) faces += 0x1000000;
+	if (255 == x || EmptyVoxel == getVoxel(x + 1, y, z)) faces += 0x2000000;
+	if (0 == y || EmptyVoxel == getVoxel(x, y - 1, z)) faces += 0x4000000;
+	if (255 == y || EmptyVoxel == getVoxel(x, y + 1, z)) faces += 0x8000000;
+	if (0 == z || EmptyVoxel == getVoxel(x, y, z - 1)) faces += 0x10000000;
+	if (255 == z || EmptyVoxel == getVoxel(x, y, z + 1)) faces += 0x20000000;
+
+	SolidFaces[voxelposition] = faces;
+}
+
+
+

@@ -1,0 +1,59 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel ReverseCast
+#pragma kernel ClearCastBuffer
+
+#include "ChunkConstants.cginc"
+#include "VoxelHelper.cginc"
+
+// RWTexture2D<GeomVoxelData> Result;
+//TODO: need more capacity in GeomVoxelData:  use three ints (globals!)
+RWStructuredBuffer<GeomVoxelData> Result;
+StructuredBuffer<GeomVoxelData> _displayBuffer;
+uint _bufferSize;
+float3 chunkGlobalPos;
+float4 cam;
+float nearClipDistance;
+float3 _nearClipMinCorner;
+float3 _nearClipMaxCorner;
+uint2 _bufferResolutionXY;
+
+
+[numthreads(REVERSE_CAST_THREAD_COUNT,1,1)]
+void ReverseCast (uint id : SV_DispatchThreadID)
+{
+	if(id < _bufferSize) {
+		uint vox = _displayBuffer[id].voxel;
+		int3 local = decodeVoxelPosition(vox);
+		float3 pos = chunkGlobalPos + local;
+		float distSq = LengthSquared(pos - cam.xyz);
+		float3 v = normalize( pos - cam.xyz);
+		float3 m = nearClipDistance / v; 
+		float mag = MinAbs(m);
+		float3 g = v * mag;
+		float3 i = g - _nearClipMinCorner;
+		float3 r = _nearClipMaxCorner - _nearClipMinCorner;
+		i /= r;
+		uint2 index = uint2( i.x * _bufferResolutionXY.x, i.y * _bufferResolutionXY.y);
+		uint iFlat = index.x + index.y * _bufferResolutionXY.x;
+
+
+		//TODO:  or something,  InterlockedCompareStore(/* dest */, /* compare_value */, /* value */);
+		if(LengthSquared(Result[iFlat].voxel + chunkGlobalPos - cam.xyz) > distSq) {
+			GeomVoxelData gvd;
+			gvd.voxel = int4(pos, decodeVoxelID(vox));
+			Result[iFlat] = gvd;
+		}
+
+
+	}
+	// Result[id.xy] = float4(id.x & id.y, (id.x & 15)/15.0, (id.y & 15)/15.0, 0.0);
+
+}
+
+[numthreads(BUFF_THREADS_X, BUFF_THREADS_Y, 1)]
+void ClearCastBuffer(uint id : SV_DispatchThreadID)
+{
+	GeomVoxelData gvd;
+	gvd.voxel = encodeVoxelPosition(255, uint3(999999,999999,999999));
+	Result[id] = gvd;
+}

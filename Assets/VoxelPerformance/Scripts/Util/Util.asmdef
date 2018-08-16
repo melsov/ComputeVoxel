@@ -1,0 +1,10 @@
+{
+    "name": "Util",
+    "references": [
+        "Math"
+    ],
+    "optionalUnityReferences": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false
+}
