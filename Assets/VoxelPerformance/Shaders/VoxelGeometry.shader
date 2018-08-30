@@ -28,6 +28,7 @@ Shader "VoxelPerformance/VoxelGeometryShader"
 
       #include "UnityCG.cginc"
       #include "ChunkConstants.cginc"
+      #include "VoxGeomHelper.cginc"
 
 
       #define PI 3.14159265359
@@ -39,7 +40,7 @@ Shader "VoxelPerformance/VoxelGeometryShader"
       float4 _cameraPosition, _chunkPosition;
 
       float3 _globalLight;
-      fixed _minAmbianLight = .4;
+      fixed _minAmbianLight = .75;
 
       float _mipStretch;
 
@@ -51,27 +52,18 @@ Shader "VoxelPerformance/VoxelGeometryShader"
       StructuredBuffer<GeomVoxelData> _displayPointsLOD2;
       StructuredBuffer<GeomVoxelData> _displayPointsLOD4;
 
-      struct input
+      
+
+
+      GeomVoxelData GetVoxelAtMip(uint index)
       {
-        float4 pos : SV_POSITION;
-        float4 _color : COLOR;
-        float2 uv : TEXCOORD0;
-      };
-
-      struct inputGS
-      {
-        float4 pos : SV_POSITION;
-        float4 _color : COLOR;
-        float4 uvOffset : TEXCOORD0;
-      };
-
-
-      GeomVoxelData GetVoxelAtMip(uint index){
-
-        if(_mipStretch < 1.1) {
+        if(_mipStretch < 1.1) 
+        {
           return _displayPoints[index];
         }
-        if(_mipStretch < 2.1) {
+
+        if(_mipStretch < 2.1) 
+        {
           return _displayPointsLOD2[index];
         }
 
@@ -82,7 +74,8 @@ Shader "VoxelPerformance/VoxelGeometryShader"
       {
         inputGS o;
        
-        uint voxel = GetVoxelAtMip(id).voxel; 
+        GeomVoxelData data = GetVoxelAtMip(id);
+        uint voxel = data.voxel; 
 
         //
         // The four bytes in voxel are: type, x, y, z.
@@ -91,6 +84,9 @@ Shader "VoxelPerformance/VoxelGeometryShader"
         o.pos = float4(voxel/65536 % CHUNK_DIM_X, voxel/256 % CHUNK_DIM_Y, voxel % CHUNK_DIM_Z, 1.0f ); // 65536 = 256 squared
         uint type = voxel/16777216; // 16777216 = 256 cubed
 
+
+        //DEBUG
+        type += _chunkPosition.y % 8;
         //
         // Center the cube if it's larger than 1x1x1. (does nothing if _mipStretch == 1)
         // fmod is short for 'float mod'. 
@@ -98,7 +94,13 @@ Shader "VoxelPerformance/VoxelGeometryShader"
         //
         o.pos.xyz = o.pos.xyz - fmod(o.pos.xyz, _mipStretch) + (_mipStretch/2 - .5);
 
-        o._color = float4(1,1,1,1);
+        //
+        // NeighborBits12
+        //
+        float neiBits12 = data.extras;
+        o.extras = uint4(neiBits12, neiBits12, neiBits12, neiBits12);
+
+        o._color = float4(1,1,1, neiBits12); 
 
         o.uvOffset = float4(0, 0, 0, 0);
         o.uvOffset.x = ((type - 1) % 4) * .25;
@@ -127,6 +129,11 @@ Shader "VoxelPerformance/VoxelGeometryShader"
         pIn3.uv = float2( 1.0f, 0.0f ) / TEX_TILE_SCALE + p[0].uvOffset.xy;
         pIn4.uv = float2( 1.0f, 1.0f ) / TEX_TILE_SCALE + p[0].uvOffset.xy;
 
+
+        // save original color data
+        uint4 extras = p[0].extras; //_color;
+
+        
         //
         // global light calcluation
         //
@@ -139,64 +146,65 @@ Shader "VoxelPerformance/VoxelGeometryShader"
         // float3 fakeLightGlobalPos = float3(1000, 1000, 300);
         fixed3 lightDir = normalize(voxelPosition.xyz - _globalLight); // fakeLightGlobalPos);
 
+
         fixed3 xyzLight = fixed3(dot(lightDir, xNorm), dot(lightDir, yNorm), dot(lightDir, zNorm)) * -1;
-        xyzLight = (1 - _minAmbianLight) * (xyzLight / 2 + .5) + _minAmbianLight;
+        xyzLight = 1; // TEST--WANT-->  (1 - _minAmbianLight) * (xyzLight / 2 + .5) + _minAmbianLight;
 
 
         shift = (_cameraPosition.x < voxelPosition.x)?float4( 1, 1, 1, 1 ):float4( -1, 1, -1, 1 );
 
-        pIn1._color = pIn2._color = pIn3._color = pIn4._color = p[0]._color * xyzLight.x; //1
+        pIn1._color = pIn2._color = pIn3._color = pIn4._color = float4(1, .9, .9, 1); // p[0]._color * xyzLight[0]; //1
 
-        pIn1.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( -halfS, -halfS, halfS, 0 )  ));
+        pIn1 = GetVertData(pIn1, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_X, 0 );
         triStream.Append( pIn1 );
 
-        pIn2.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( -halfS, halfS, halfS, 0 ) ));
+        pIn2 = GetVertData(pIn2, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_X, 1 );
         triStream.Append( pIn2 );
 
-        pIn3.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( -halfS, -halfS, -halfS, 0 )  ));
+        pIn3 = GetVertData(pIn3, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_X, 2 );
         triStream.Append( pIn3 );
 
-        pIn4.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( -halfS, halfS, -halfS, 0 )  ));
+        pIn4 = GetVertData(pIn4, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_X, 3 );
         triStream.Append( pIn4 );
 
         triStream.RestartStrip();
 
 
         // shadows
-        pIn1._color = pIn2._color = pIn3._color = pIn4._color = p[0]._color * xyzLight.y; // .7;
+        pIn1._color = pIn2._color = pIn3._color = pIn4._color = float4(.9, 1, .9, 1); // p[0]._color * xyzLight.y; // .7;
 
         shift = (_cameraPosition.y < voxelPosition.y)?float4( 1, 1, 1, 1 ):float4( 1, -1, -1, 1 );
 
-        pIn1.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( -halfS, -halfS, halfS, 0 ) ));
+        pIn1 = GetVertData(pIn1, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_Y, 0 );
         triStream.Append( pIn1 );
 
-        pIn2.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( -halfS, -halfS, -halfS, 0 ) ));
+        pIn2 = GetVertData(pIn2, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_Y, 1 );
         triStream.Append( pIn2 );
 
-        pIn3.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( halfS, -halfS, halfS, 0 )  ));
+        pIn3 = GetVertData(pIn3, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_Y, 2 );
         triStream.Append( pIn3 );
 
-        pIn4.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( halfS, -halfS, -halfS, 0 )  ));
+        pIn4 = GetVertData(pIn4, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_Y, 3 );
         triStream.Append( pIn4 );
 
         triStream.RestartStrip();
 
 
         //side shadows
-        pIn1._color = pIn2._color = pIn3._color = pIn4._color = p[0]._color * xyzLight.z; // .9;
+        pIn1._color = pIn2._color = pIn3._color = pIn4._color = float4(.9, .9, 1, 1); // p[0]._color * xyzLight.z; // .9;
 
         shift = (_cameraPosition.z < voxelPosition.z)?float4( 1, 1, 1, 1 ):float4( -1, 1, -1, 1 );
 
-        pIn1.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( -halfS, -halfS, -halfS, 0 )  ));
+        pIn1 = GetVertData(pIn1, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_Z, 0 );
         triStream.Append( pIn1 );
 
-        pIn2.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( -halfS, halfS, -halfS, 0 )  ));
+        pIn2 = GetVertData(pIn2, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_Z, 1 );
         triStream.Append( pIn2 );
 
-        pIn3.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( halfS, -halfS, -halfS, 0 )  ));
+        pIn3 = GetVertData(pIn3, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_Z, 2 );
         triStream.Append( pIn3 );
 
-        pIn4.pos = mul( UNITY_MATRIX_VP, mul( _worldMatrixTransform, pos + shift*float4( halfS, halfS, -halfS, 0 )  ));
+        pIn4 = GetVertData(pIn4, _worldMatrixTransform, pos, extras, shift, halfS, FACES_OFFSET_Z, 3 );
         triStream.Append( pIn4 );
 
         triStream.RestartStrip();
@@ -206,7 +214,7 @@ Shader "VoxelPerformance/VoxelGeometryShader"
 
       float4 frag( input i ) : COLOR
       {
-        return float4(i._color) * tex2D( _Sprite, i.uv );
+        return float4(i._color); // want --> * tex2D( _Sprite, i.uv );
       }
 
     ENDCG

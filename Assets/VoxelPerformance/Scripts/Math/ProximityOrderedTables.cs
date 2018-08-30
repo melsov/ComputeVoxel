@@ -18,6 +18,16 @@ namespace Mel.Math
             coords = ProximityOrderedTables.ProximityOrderedIntVectors(cubeSize);
         }
 
+        public ProximityOrderCoords(IntVector3 cube)
+        {
+            coords = ProximityOrderedTables.ProximityOrderedIntVectors(cube);
+        }
+
+        public ProximityOrderCoords(IntVector3 cube, IntVector3 boundsSize)
+        {
+            coords = ProximityOrderedTables.ProximityOrderedBoundsOrigins(cube, boundsSize);
+        }
+
         public IntVector3 this[int i] { get { return coords[i]; } }
 
         public IEnumerable<IntVector3> Iterator {
@@ -53,7 +63,32 @@ namespace Mel.Math
             Debug.Log(sb.ToString());
         }
 
+        public static IntVector3[] ProximityOrderedBoundsOrigins(IntVector3 cubeSize, IntVector3 boundsSize)
+        {
+            var scaledSize = cubeSize / boundsSize;
+            var iter = ProximityOrderedIntVectors(scaledSize);
+            var result = new IntVector3[iter.Length];
+            for(int i=0; i<result.Length; ++i)
+            {
+                result[i] = iter[i] * boundsSize;
+            }
+            return result;
+        }
 
+        public static IntVector3[] ProximityOrderedIntVectors(IntVector3 cubeSize)
+        {
+            var bounds = IntBounds3.FromCenterHalfSize(IntVector3.zero, cubeSize / 2);
+            var iter = ProximityOrderedIntVectors(cubeSize.MaxComponent);
+            var result = new List<IntVector3>(cubeSize.Area);
+            foreach(var v in iter)
+            {
+                if (bounds.Contains(v))
+                {
+                    result.Add(v);
+                }
+            }
+            return result.ToArray();
+        }
 
         public static IntVector3[] ProximityOrderedIntVectors(int cubeSize)
         {
@@ -79,7 +114,7 @@ namespace Mel.Math
                     ivs.Add(iv);
                 }
                 p = b;
-                b = b.ExpandBordersAdditive(new IntVector3(1));
+                b = b.ExpandedBordersAdditive(new IntVector3(1));
             }
 
             if (cubeSize % 2 == 0)

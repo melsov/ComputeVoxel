@@ -1,0 +1,194 @@
+﻿// VoxelPerformance/Shaders/MeshGeneration.compute
+// Copyright 2016 Charles Griffiths
+
+#include "ChunkConstants.cginc"
+#include "VoxelHelper.cginc"
+
+
+#pragma kernel ExposedVoxels
+#pragma kernel ExposedVoxelsLOD2
+#pragma kernel ExposedVoxelsLOD4
+
+#pragma kernel FaceCopy
+
+
+StructuredBuffer<uint> MapVoxels;
+StructuredBuffer<uint> MapVoxelsLOD2;
+StructuredBuffer<uint> MapVoxelsLOD4;
+
+StructuredBuffer<uint> ExistsMap27;
+
+StructuredBuffer<uint> MapHeights;
+
+RWStructuredBuffer<uint> ShownVoxelCount;
+RWStructuredBuffer<uint> ShownVoxelOffset;
+
+
+
+RWStructuredBuffer<GeomVoxelData> ShownVoxels;
+RWStructuredBuffer<GeomVoxelData> ShownVoxelsLOD2;
+RWStructuredBuffer<GeomVoxelData> ShownVoxelsLOD4;
+
+RWStructuredBuffer<uint> TotalVoxelsPerLODCount;
+
+
+RWStructuredBuffer<GeomVoxelData> SolidVoxels;
+RWStructuredBuffer<GeomVoxelData> SolidVoxelsLOD2;
+RWStructuredBuffer<GeomVoxelData> SolidVoxelsLOD4;
+
+
+
+
+uint facesForVoxel(uint x, uint y, uint z);
+
+
+int getEnvelopeVoxel(uint x, uint y, uint z){
+	return 0; //TODO
+}
+
+int getVoxel(uint x, uint y, uint z)
+{
+	uint voxels = MapVoxels[(z * CHUNK_DIM_Z + x) * MAP_DATA_DIM_Y + y / 4]; // four voxels per int
+	return 
+    (0 == (y % 4)) * ((voxels / (256 * 256 * 256)) % 256) +
+		(1 == (y % 4)) * ((voxels / (256 * 256)) % 256) +
+		(2 == (y % 4)) * ((voxels / 256) % 256) +
+		(3 == (y % 4)) * (voxels % 256);
+}
+
+int getVoxelLOD2(uint x, uint y, uint z)
+{
+	return decodeVoxelID(MapVoxelsLOD2[(x * CHUNK_DIM_Y / 2 + y) * CHUNK_DIM_Z / 2 + z]);
+}
+
+int getVoxelLOD4(uint x, uint y, uint z)
+{
+	return decodeVoxelID( MapVoxelsLOD4[(x * CHUNK_DIM_Y / 4 + y) * CHUNK_DIM_Z / 4 + z]);
+}
+
+int getVoxelForLOD(int x, int y, int z, uint LOD)
+{
+
+//	return ExistsAt27(ExistsMap27, x,y,z); //TEST
+
+	if(LOD == 0) return getVoxel(x,y,z);
+	else if (LOD == 1) return getVoxelLOD2(x,y,z);
+	else return getVoxelLOD4(x,y,z);
+}
+
+int getEncodedVoxelLOD2(uint x, uint y, uint z) { return MapVoxelsLOD2[(x * CHUNK_DIM_Y / 2 + y) * CHUNK_DIM_Z / 2 + z]; }
+
+int getEncodedVoxelLOD4(uint x, uint y, uint z) { return MapVoxelsLOD4[(x * CHUNK_DIM_Y / 4 + y) * CHUNK_DIM_Z / 4 + z]; }
+
+
+int getEncodedVoxelForLOD(uint voxelid, uint x, uint y, uint z, uint LOD)
+{
+	if(LOD == 0) return encodeVoxelPosition(voxelid, x, y, z);
+	else if(LOD == 1) return getEncodedVoxelLOD2(x,y,z);
+	else return getEncodedVoxelLOD4(x,y,z);
+}
+
+void SetShownVoxelForLOD(GeomVoxelData geom, uint LOD)
+{
+	if(LOD == 0) ShownVoxels[ShownVoxels.IncrementCounter()] = geom;
+	else if (LOD == 1) ShownVoxelsLOD2[ShownVoxelsLOD2.IncrementCounter()] = geom;
+	else ShownVoxelsLOD4[ShownVoxelsLOD4.IncrementCounter()] = geom;
+}
+
+
+
+void ExposedVoxelsAtLOD(uint3 dtid, uint LOD)
+{
+	uint x, y, z;
+	x = dtid.x % CHUNK_DIM_X; 
+	y = dtid.y % CHUNK_DIM_Y;
+	z = dtid.z % CHUNK_DIM_Z; 
+
+	//
+	// Use ExistsMap27 to check visibility
+	// Also use to set the neighbor12 (27?) data in extras
+	//
+	uint voxelid = getVoxelForLOD(x, y, z, LOD);
+
+#ifdef TEST_SHOW_ALL
+	int shownIndex = ShownVoxels.IncrementCounter();
+	ShownVoxels[shownIndex] = ((voxelid * 256 + x) * 256 + y) * 256 + z;
+
+#else
+	if (EmptyVoxel != voxelid)
+	{
+	
+
+		int3 pos = int3(x,y,z);
+		for(int i = 0; i < 6; ++i)
+		{
+			if(!ExistsAt27( ExistsMap27, Neighbors6[i] + pos))  //TODO: exists at LOD
+			{
+				GeomVoxelData geom;
+				geom.voxel = getEncodedVoxelForLOD(voxelid, x, y, z, LOD); // encodeVoxelPosition(voxelid, x, y, z);
+
+				geom.extras = 0;
+				// neighbor 12
+				for(int j = 0; j < 27; ++j)
+				{
+					//WANT
+					geom.extras = SetBit(geom.extras, j, ExistsAt27(ExistsMap27, pos + Cube27XYZRelative[j]));
+				}
+
+				SetShownVoxelForLOD(geom, LOD);
+				break;
+			}
+		}
+		
+	} 
+
+#endif
+}
+
+
+[numthreads(CHUNK_THREADS_X, CHUNK_THREADS_Y, CHUNK_THREADS_Z)]
+void ExposedVoxels(uint3 dtid : SV_DispatchThreadID)
+{
+	ExposedVoxelsAtLOD(dtid, 0);
+}
+
+[numthreads(CHUNK_THREADS_X, CHUNK_THREADS_Y, CHUNK_THREADS_Z)]
+void ExposedVoxelsLOD2(uint3 dtid : SV_DispatchThreadID)
+{
+	ExposedVoxelsAtLOD(dtid, 1);	
+}
+
+[numthreads(CHUNK_THREADS_X, CHUNK_THREADS_Y, CHUNK_THREADS_Z)]
+void ExposedVoxelsLOD4(uint3 dtid : SV_DispatchThreadID)
+{
+	ExposedVoxelsAtLOD(dtid, 2);
+}
+
+
+
+
+[numthreads(1,1,1)]
+void FaceCopy(uint dtid : SV_DispatchThreadID) 
+{
+
+	uint count = TotalVoxelsPerLODCount[0];
+	uint i;
+	for(i = 0; i < count; ++i){
+		SolidVoxels[SolidVoxels.IncrementCounter()] = ShownVoxels[i];
+	}
+
+	count = TotalVoxelsPerLODCount[1]; 
+	for(i = 0; i < count; ++i){
+		SolidVoxelsLOD2[SolidVoxelsLOD2.IncrementCounter()] = ShownVoxelsLOD2[i];
+	}
+
+	count = TotalVoxelsPerLODCount[2]; 
+	for(i = 0; i < count; ++i){
+		SolidVoxelsLOD4[SolidVoxelsLOD4.IncrementCounter()] = ShownVoxelsLOD4[i];
+	}
+
+}
+
+
+
+

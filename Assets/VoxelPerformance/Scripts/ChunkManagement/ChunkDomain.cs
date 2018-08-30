@@ -8,6 +8,8 @@ using System.Linq;
 using System;
 using VoxelPerformance;
 using UnityEditor;
+using Mel.ChunkManagement;
+using System.IO;
 
 public class ChunkDomain : MonoBehaviour {
 
@@ -20,6 +22,9 @@ public class ChunkDomain : MonoBehaviour {
     [SerializeField]
     Transform player;
 
+    [SerializeField]
+    AreaGenerator areaGenerator;
+
 
     AddChunkFinder addChunkFinder;
     ChunkAddQueue chunkAddQueue {
@@ -28,7 +33,9 @@ public class ChunkDomain : MonoBehaviour {
     LiveChunks liveChunks;
 
     [SerializeField]
-    ChunkForge forge;
+    ChunkForge forgeProto;
+
+    HopefullySaferForgePool forgePool;
 
     //[SerializeField]
     //ReverseCastBuffer reverseCastBuffer;
@@ -41,7 +48,7 @@ public class ChunkDomain : MonoBehaviour {
 
     IntBounds3 preserveDomain {
         get {
-            return addChunkFinder.domain.ExpandBordersAdditive(preserveBorderWidth);
+            return addChunkFinder.domain.ExpandedBordersAdditive(preserveBorderWidth);
         }
     }
 
@@ -52,6 +59,8 @@ public class ChunkDomain : MonoBehaviour {
 
     private void Awake()
     {
+        areaGenerator.onChunkDataReady += OnChunkDataReady;
+        forgePool = new HopefullySaferForgePool(4, forgeProto);
         liveChunks = new LiveChunks();
         addChunkFinder = new AddChunkFinder(halfSize, player, liveChunks, null);
     }
@@ -62,6 +71,8 @@ public class ChunkDomain : MonoBehaviour {
         TestManualRemove();
         CheckKeys();
     }
+
+    #region key-input
 
     private void CheckKeys()
     {
@@ -91,7 +102,7 @@ public class ChunkDomain : MonoBehaviour {
             liveChunks.TestRemove(new IntVector3(0));
         }
         else if (Input.GetKeyDown(KeyCode.L)){
-            if(forge.UnPack(new IntVector3(0), OnChunkIsDone))
+            if(forgePool.UnPack(new IntVector3(0), OnChunkIsDone))
             {
                 Debug.Log("will add");
             } else
@@ -100,6 +111,8 @@ public class ChunkDomain : MonoBehaviour {
             }
         }
     }
+
+    #endregion
 
     IntVector3 center {
         get {
@@ -114,17 +127,53 @@ public class ChunkDomain : MonoBehaviour {
         return dif < halfSize;
     }
 
+    Queue<IntVector3> testBuildOnReady = new Queue<IntVector3>();
+
+    void OnChunkDataReady(IntVector3 chunkPos)
+    {
+        testBuildOnReady.Enqueue(chunkPos);
+    }
+
+    
+
     void CurateDomain()
     {
+        if(vGenConfig.ChunkDomainShouldDoNothing)
+        {
+            return;
+        }
+        //TEST
+        //
+        // Use build on ready
+        // if the chunk is within the area we'd like to build in
+        // add it to chunkAddQueue (i think)
+        //
+        // otherwise, business as usual, search for chunks to build
+        // if they are null, skip them and don't keep asking for them
+
+        if (testBuildOnReady.Count > 0)
+        {
+            if (!forgePool.Busy)
+            {
+                var cpos = testBuildOnReady.Dequeue();
+                forgePool.UnPack(cpos, OnChunkIsDone);
+            }
+
+        }
+
+        //END TEST
+
+        //WANT
+        /*
         IntVector3 addChunkPos;
         if(addChunkFinder.Next(out addChunkPos))
         {
             chunkAddQueue.Add(addChunkPos);
         }
         IntVector3 forgeChunkPos;
-        if(!forge.Busy && addChunkFinder.NextStartBuild(out forgeChunkPos)) // chunkAddQueue.Next(out forgeChunkPos))
+        if(!forgePool.Busy && addChunkFinder.NextStartBuild(out forgeChunkPos)) // chunkAddQueue.Next(out forgeChunkPos))
         {
-            forge.UnPack(forgeChunkPos, OnChunkIsDone);
+            forgePool.UnPack(forgeChunkPos, OnChunkIsDone);
         }
 
         var remove = liveChunks.NextRemovable(vGenConfig.PosToChunkPos(center), MaxChunks);
@@ -132,7 +181,7 @@ public class ChunkDomain : MonoBehaviour {
         {
             liveChunks.Remove(remove);
         }
-
+        */
     }
 
     
@@ -141,12 +190,11 @@ public class ChunkDomain : MonoBehaviour {
     {
         if(c == null)
         {
+            Debug.Log("got back a null chunk");
             return;
         }
         liveChunks.Add(c);
-        //reverseCastBuffer.SetCaster(c);
 
-        Debug.Log("chunk done" + c.ToString());
     }
 
     class LiveChunks
@@ -304,15 +352,28 @@ public class ChunkDomain : MonoBehaviour {
             return false;
         }
 
+        bool HasBeenNeighborProcessed(IntVector3 chunkPos)
+        {
+            if (File.Exists(SerializedChunk.GetMetaDataFullPath(chunkPos)))
+            {
+                Chunk.MetaData meta = XMLOp.Deserialize<Chunk.MetaData>(SerializedChunk.GetMetaDataFullPath(chunkPos));
+                return meta.HasBeenNeighborProcessed;
+            }
+            return false;
+        }
+
         bool Closest(IntVector3 center, out IntVector3 result)
         {
             foreach(var c in pCoords.Iterator)
             {
                 var subject = center + c;
-                if (storage.Remove(subject))
+                if (VGenConfig.ComputeInChunkDomain || HasBeenNeighborProcessed(subject))
                 {
-                    result = subject;
-                    return true;
+                    if (storage.Remove(subject))
+                    {
+                        result = subject;
+                        return true;
+                    }
                 }
             }
             result = default(IntVector3);

@@ -38,7 +38,7 @@ namespace Mel.VoxelGen
         ComputeBuffer TotalVoxelsPerLODCount;
 
         // passed to geometry shader
-        ComputeBuffer SolidVoxels;  
+        ComputeBuffer SolidVoxels;
         ComputeBuffer SolidVoxelsLOD2;
         ComputeBuffer SolidVoxelsLOD4;
 
@@ -109,6 +109,7 @@ namespace Mel.VoxelGen
         #endregion
 
 
+
         #region take-buffers
 
         public MapDisplay.LODBuffers takeDisplayBuffers()
@@ -122,6 +123,38 @@ namespace Mel.VoxelGen
             SolidVoxelsLOD2 = null;
             SolidVoxelsLOD4 = null;
             return lodBuffers;
+        }
+
+        ComputeBuffer GetShownAtLOD(int i)
+        {
+            switch (i)
+            {
+                case 0: return ShownVoxels;
+                case 1: return ShownVoxelsLOD2;
+                case 2: return ShownVoxelsLOD4;
+                default: return null;
+            }
+        }
+
+        ComputeBuffer GetSolidAtLOD(int i)
+        {
+            switch (i)
+            {
+                case 0: return SolidVoxels;
+                case 1: return SolidVoxelsLOD2;
+                case 2: return SolidVoxelsLOD4;
+                default: return null;
+            }
+        }
+
+        public MapDisplay.LODArrays CopySolidArraysUsingCounts()
+        {
+            var lod = MapDisplay.LODArrays.Create();
+            for (int i = 0; i < ChunkGenData.LODLevels; ++i)
+            {
+                lod[i] = BufferCountArgs.GetData<VoxelGeomDataMirror>(GetSolidAtLOD(i));
+            }
+            return lod;
         }
 
         //public MapDisplay.DisplayBuffers takeDisplayBuffers()
@@ -187,7 +220,7 @@ namespace Mel.VoxelGen
 
             public static T[] GetData<T>(ComputeBuffer buffer)
             {
-                if(buffer == null)
+                if (buffer == null)
                 {
                     return new T[0];
                 }
@@ -197,13 +230,35 @@ namespace Mel.VoxelGen
                 // Default type buffers dont; just use buffer.count
                 //
                 int count = bca.count;
-                if(count == 0)
+                if (count == 0)
                 {
                     count = buffer.count;
                 }
                 var data = new T[count];
                 buffer.GetData(data);
                 return data;
+            }
+
+            public static bool GetCounterBufferData<T>(ComputeBuffer buffer, out T[] data)
+            {
+                if (buffer == null)
+                {
+                    Debug.LogWarning("Trying to get the count of a null buffer");
+                    data = new T[0];
+                    return false;
+                }
+                var bca = FromBuffer(buffer);
+                if(bca.count == 0)
+                {
+                    Debug.LogWarning("Buffer count was zero, (hope that's ok?)");
+                    data = new T[0];
+                    return false;
+                }
+
+                Debug.Log("Get data with count: " + bca.count);
+                data = new T[bca.count];
+                buffer.GetData(data);
+                return true;
             }
 
             public static ComputeBuffer CreateBuffer<T>(T[] data)
@@ -215,7 +270,7 @@ namespace Mel.VoxelGen
 
             public static ComputeBuffer CreateBuffer<T>(NativeArray<T> narray) where T : struct
             {
-                if(narray.Length == 0) { return null; }
+                if (narray.Length == 0) { return null; }
                 T[] data = new T[narray.Length];
                 narray.CopyTo(data);
                 return CreateBuffer(data);
@@ -224,7 +279,7 @@ namespace Mel.VoxelGen
             public static bool CreateBufferFromCount<T>(ComputeBuffer from, out ComputeBuffer target, ComputeBufferType type = ComputeBufferType.Default)
             {
                 var args = FromBuffer(from);
-                if(args.count == 0)
+                if (args.count == 0)
                 {
                     target = null;
                     return false;
@@ -261,7 +316,7 @@ namespace Mel.VoxelGen
             ShownVoxels.GetData(voxels, 0, 0, voxels.Length);
 
             int bits = vGenConfig.hilbertBits;
-            return voxels.OrderBy(vox => HilbertTables.XYZToHilbertIndex[IntVector3.FromVoxelInt((int)vox).ToFlatXYZIndex(vGenConfig.ChunkSize)]).ToArray(); 
+            return voxels.OrderBy(vox => HilbertTables.XYZToHilbertIndex[IntVector3.FromVoxelInt((int)vox).ToFlatXYZIndex(vGenConfig.ChunkSize)]).ToArray();
         }
 
         // TODO: hilbert sorting could be done on GPU while finding exposed voxels?
@@ -318,7 +373,7 @@ namespace Mel.VoxelGen
             var groupsLOD2 = vGenConfig.GroupsPerChunkAtLOD(1);
             meshGen.Dispatch(ExposedVoxelsKernelLOD2, groupsLOD2.x, groupsLOD2.y, groupsLOD2.z);
 
-            ShownVoxelsLOD4.SetCounterValue(0); 
+            ShownVoxelsLOD4.SetCounterValue(0);
             var groupsLOD4 = vGenConfig.GroupsPerChunkAtLOD(2);
             meshGen.Dispatch(ExposedVoxelsKernelLOD4, groupsLOD4.x, groupsLOD4.y, groupsLOD4.z);
         }
@@ -339,7 +394,7 @@ namespace Mel.VoxelGen
             return data;
         }
 
-        
+
 
         //
         // Face copy kernels copy voxel data into packed arrays
@@ -350,10 +405,8 @@ namespace Mel.VoxelGen
         {
             int buffCreateError = 0;
             BufferUtil.ReleaseBuffers(SolidVoxels, SolidVoxelsLOD2, SolidVoxelsLOD4, TotalVoxelsPerLODCount);
-            Assert.IsTrue(SolidVoxelsLOD2 == null, "Solide LOD 2 not null?");
-            Assert.IsTrue(SolidVoxelsLOD4 == null, "Solide not null?");
-            Assert.IsTrue(SolidVoxels == null, "Solide not null?");
-            if (!BufferCountArgs.CreateBufferFromCount<uint>(ShownVoxels, out SolidVoxels))
+
+            if (!BufferCountArgs.CreateBufferFromCount<VoxelGeomDataMirror>(ShownVoxels, out SolidVoxels))
             {
                 buffCreateError++;
             }
@@ -362,7 +415,7 @@ namespace Mel.VoxelGen
                 meshGen.SetBuffer(FaceCopyKernel, "SolidVoxels", SolidVoxels);
             }
 
-            if (!BufferCountArgs.CreateBufferFromCount<uint>(ShownVoxelsLOD2, out SolidVoxelsLOD2))
+            if (!BufferCountArgs.CreateBufferFromCount<VoxelGeomDataMirror>(ShownVoxelsLOD2, out SolidVoxelsLOD2))
             {
                 buffCreateError++;
             }
@@ -371,7 +424,7 @@ namespace Mel.VoxelGen
                 meshGen.SetBuffer(FaceCopyKernel, "SolidVoxelsLOD2", SolidVoxelsLOD2);
             }
 
-            if (!BufferCountArgs.CreateBufferFromCount<uint>(ShownVoxelsLOD4, out SolidVoxelsLOD4))
+            if (!BufferCountArgs.CreateBufferFromCount<VoxelGeomDataMirror>(ShownVoxelsLOD4, out SolidVoxelsLOD4))
             {
                 buffCreateError++;
             }
@@ -380,7 +433,7 @@ namespace Mel.VoxelGen
                 meshGen.SetBuffer(FaceCopyKernel, "SolidVoxelsLOD4", SolidVoxelsLOD4);
             }
 
-            if(buffCreateError > 0)
+            if (buffCreateError > 0)
             {
                 BufferUtil.ReleaseBuffers(SolidVoxels, SolidVoxelsLOD2, SolidVoxelsLOD4, TotalVoxelsPerLODCount);
                 //DBUG
@@ -436,6 +489,9 @@ namespace Mel.VoxelGen
                 HilbertIndices,
                 OutHilbertIndices,
                 HilbertLODRanges,
+                SolidVoxels,
+                SolidVoxelsLOD2,
+                SolidVoxelsLOD4
             };
             BufferUtil.ReleaseBuffers(buffs);
 

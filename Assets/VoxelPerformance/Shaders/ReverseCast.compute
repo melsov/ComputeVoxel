@@ -41,6 +41,7 @@ void ReverseCast (uint id : SV_DispatchThreadID)
 		if(LengthSquared(Result[iFlat].voxel + chunkGlobalPos - cam.xyz) > distSq) {
 			GeomVoxelData gvd;
 			gvd.voxel = int4(pos, decodeVoxelID(vox));
+			gvd.extras = 43;
 			Result[iFlat] = gvd;
 		}
 
@@ -55,5 +56,6 @@ void ClearCastBuffer(uint id : SV_DispatchThreadID)
 {
 	GeomVoxelData gvd;
 	gvd.voxel = encodeVoxelPosition(255, uint3(999999,999999,999999));
+	gvd.extras = 42;
 	Result[id] = gvd;
 }

@@ -25,10 +25,13 @@ namespace Mel.Editorr
 // Values copied from VGenConfig
 // Use editor menu: MEL / Write Chunk CGInc to change them
 
+#define SIZE_OF_INT 32
 
 #define CHUNK_DIM_X {0}
 #define CHUNK_DIM_Y {1}
 #define CHUNK_DIM_Z {2}
+
+#define CHUNK_SIZE (uint3(CHUNK_DIM_X, CHUNK_DIM_Y, CHUNK_DIM_Z))
 
 #define COLUMNS_PER_CHUNK {3}
 #define VOXELS_PER_CHUNK {4}
@@ -66,11 +69,11 @@ namespace Mel.Editorr
 {23} // Test shape?
 {24} // Test chunk select?
 
-#define EmptyVoxel 0
 
 struct GeomVoxelData
 {{
    uint voxel;
+   uint extras;
 }};
 
 struct RevCastData
@@ -85,6 +88,10 @@ struct RevCastData
 
 {28}#define FILL_CHUNK_EDGES
 
+#define EmptyVoxel {29}
+
+#define SIZE_OF_EXISTSMAP {30}
+#define SIZE_OF_EXISTSMAP27 {31}
 
 #endif
 ";
@@ -102,7 +109,7 @@ struct RevCastData
                 vGenConfig.ChunkThreadsPerGroupX,
                 vGenConfig.ChunkThreadsPerGroupY,
                 vGenConfig.ChunkThreadsPerGroupZ,
-                vGenConfig.VoxelsPerMapData,
+                VGenConfig.VoxelsPerMapData,
                 vGenConfig.MapDataDimY,
                 vGenConfig.BedRockToMax, 
                 vGenConfig.SeaLevel, 
@@ -120,7 +127,10 @@ struct RevCastData
                 vGenConfig.ReverseCastThreadCount, 
                 vGenConfig.ReverseCastClearKernelThreadCount.x,
                 vGenConfig.ReverseCastClearKernelThreadCount.y,
-                vGenConfig.TestFillChunkEdges ? String.Empty : "//"
+                vGenConfig.TestFillChunkEdges ? String.Empty : "//",
+                vGenConfig.EmptyVoxel,
+                vGenConfig.SizeOfExistsMap,
+                vGenConfig.SizeOfExistsMap27
 
                 );
             File.WriteAllText(path, config);

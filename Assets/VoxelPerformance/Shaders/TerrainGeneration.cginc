@@ -74,8 +74,13 @@ VoxelData Voxel(float3 worldPosition)
     H = gradient(H, GRADIENT_HEIGHT);
     float t = threshhold(H, SOLID_TERRAIN_THRESHHOLD);
 
-    //Which type of voxel?
-    t *= 9; // TODO: voxelType() function. for now it's always 9 (or zero)
+    //
+    // Which type of voxel?
+    // If t == 0, set it to EmptyVoxel (which is probably zero also, but let's not assume)
+    // else set t to some type (some value corresponding to a type)
+    // TODO: make a voxelType() function. for now it's an arbitrary number.
+    //
+    t = (1 - t) * EmptyVoxel + t * 8; 
 
     //
     // return a VoxelData

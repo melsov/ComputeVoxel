@@ -7,6 +7,9 @@ using Mel.Math;
 using System.Collections;
 using VoxelPerformance;
 using Mel.Util;
+using System.Threading.Tasks;
+using Mel.FakeData;
+using Mel.ChunkManagement;
 
 namespace Mel.VoxelGen
 {
@@ -17,6 +20,7 @@ namespace Mel.VoxelGen
 
         [SerializeField] ComputeShader perlinGen;
         [SerializeField] ComputeShader meshGen;
+        [SerializeField] ComputeShader neighborFormat;
         [SerializeField] ComputeShader hilbertShader;
         [SerializeField] Shader geometryShader;
 
@@ -28,12 +32,169 @@ namespace Mel.VoxelGen
 
         CVoxelMapData cvoxelMapData;
         CVoxelMapFormat cvoxelMapFormat;
+        CVoxelNeighborFormat cvoxelNeighborFormat;
+        CVoxelFaceCopy cvoxelFaceCopy;
+
+
 
         private void Awake()
         {
             cvoxelMapData = new CVoxelMapData(perlinGen, vGenConfig);
             cvoxelMapFormat = new CVoxelMapFormat(meshGen, hilbertShader, cvoxelMapData, vGenConfig);
+            cvoxelNeighborFormat = new CVoxelNeighborFormat(neighborFormat, vGenConfig);
+            cvoxelFaceCopy = new CVoxelFaceCopy(neighborFormat, cvoxelNeighborFormat, vGenConfig);
         }
+
+        #region gen-data
+
+        // NOTE: we must renounce chunk computing in the display thread
+        // to ensure that we don't scuttle the buffers with overlapping compute calls
+
+        public async Task<ColumnAndHeightMap<ChunkGenData>> ComputeColumnAtAsync(Column<ChunkGenData> column, Func<IntVector3, ChunkGenData> GetFromMemory)
+        {
+            //...Set data for the heightmap
+            ColumnAndHeightMap<ChunkGenData> cah = new ColumnAndHeightMap<ChunkGenData>();
+            cah.column = column;
+            cah.heightMap = new HeightMap(vGenConfig.ColumnFootprint);
+
+            var keys = cah.column.Keys.ToArray();
+            int dbugComputedCount = 0;
+            for(int i = 0; i < keys.Length; ++i)
+            {
+                var data = GetFromMemory(cah.column.position.ToIntVector3XZWithY(keys[i]));
+                if (data == null)
+                {
+                    dbugComputedCount++;
+                    data = (ChunkGenData)(await ComputeGenData(cah.column.position.ToIntVector3XZWithY(keys[i])));
+                }
+                cah.column[keys[i]] = data;
+            }
+
+
+            //TODO: set height map data
+            //int[] heights = CVoxelMapFormat.BufferCountArgs.GetData<int>(cvoxelMapData.MapHeights); //TODO: fill with actual data
+            //FAKENESS
+
+            int[] heights = FakeChunkData.FakeHeights(vGenConfig.ChunkSize, keys.OrderByDescending((k) => k).ToArray()[0]);
+
+            cah.heightMap.setData(heights);
+
+            return cah;
+        }
+
+
+        public async Task PostProcessColumnAsync(ColumnAndHeightMap<NeighborChunkGenData> columnAndHeightMap, Action<IntVector3> OnWroteChunkData)
+        {
+            //
+            // Work from top to bottom. (TODO: propagate bootstrap data downwards)
+            //
+            var keys = columnAndHeightMap.column.Keys.OrderByDescending(a => a);
+
+            foreach (var key in keys)
+            {
+                await PostProcessSetAsync(columnAndHeightMap.column[key], OnWroteChunkData);
+            }
+        }
+
+        private async Task PostProcessSetAsync(NeighborChunkGenData neighborChunkGenData, Action<IntVector3> onWroteChunkData)
+        {
+            //FAKE
+            //var fakeCGD = (ChunkGenData)(await ComputeGenDataFAKE(neighborChunkGenData.center));
+            //neighborChunkGenData.centerChunkData = fakeCGD;
+
+            //WANT
+            await _PostProcessSet(neighborChunkGenData); 
+
+            updateChunkGenData(neighborChunkGenData.centerChunkData);
+            onWroteChunkData(neighborChunkGenData.center);
+        }
+
+        IEnumerator _PostProcessSet(NeighborChunkGenData neighborChunkGenData)
+        {
+            //awkward. 
+            while(cvoxelNeighborFormat == null)
+            {
+                Debug.Log("null cvox nei format");
+                yield return new WaitForSeconds(.2f);
+            }
+            cvoxelNeighborFormat.SetBuffersWith(neighborChunkGenData);
+            cvoxelNeighborFormat.callNeighborFormatKernels();
+            yield return new WaitForEndOfFrame();
+            cvoxelFaceCopy.callFaceCopyKernel();
+            yield return new WaitForEndOfFrame();
+            yield return new object();
+        }
+
+        private void updateChunkGenData(ChunkGenData chunkGenData)
+        {
+            // DEbug
+            // cvoxelFaceCopy.DebugSetSolids(chunkGenData);
+            // end debug
+
+            chunkGenData.displays = cvoxelFaceCopy.CopySolidArraysUsingCounts(); // WANT
+
+            // write center chunk display arrays
+            Debug.Log("writing at pos: " + chunkGenData.chunkPos + " : " + chunkGenData.displays.ToString());
+            SerializedChunk.SerializedDisplayBuffers.WriteLODArrays(chunkGenData.displays, chunkGenData.chunkPos);
+            Chunk.MetaData.Write(chunkGenData);
+        }
+
+
+        IEnumerator ComputeGenDataFAKE(IntVector3 chunkPos)
+        {
+            ChunkGenData c = FakeChunkData.StairsGenData(chunkPos, vGenConfig.ChunkSize, 5);
+            yield return new WaitForEndOfFrame();
+            yield return new WaitForSeconds(.05f);
+            yield return c;
+        }
+
+        IEnumerator ComputeGenData(IntVector3 chunkPos)
+        {
+            cvoxelMapData.callClearMapBuffersKernel();
+            yield return new WaitForEndOfFrame();
+
+            cvoxelMapData.callPerlinMapGenKernel(chunkPos);
+            yield return new WaitForEndOfFrame();
+
+            /*
+            cvoxelMapData.DebugBuffs();
+
+            cvoxelMapFormat.callFaceGenKernels();
+            yield return new WaitForEndOfFrame();
+
+            cvoxelMapFormat.callFaceCopyKernel();
+            yield return new WaitForEndOfFrame();
+            cvoxelMapFormat.DebugBuffs();
+
+            */
+            ChunkGenData c = cvoxelMapData.CopyArrays();
+            c.chunkPos = chunkPos;
+            //c.displays = cvoxelMapFormat.CopySolidArraysUsingCounts();
+
+            yield return c;
+        }
+
+        public IEnumerator computeGenDataPleasePurgeMe(IntVector3 chunkPos, Action<ChunkGenData> callback)
+        {
+            cvoxelMapData.callClearMapBuffersKernel();
+            yield return new WaitForEndOfFrame();
+
+            cvoxelMapData.callPerlinMapGenKernel(chunkPos);
+            yield return new WaitForEndOfFrame();
+
+            var voxels = CVoxelMapFormat.BufferCountArgs.GetData<VoxelGenDataMirror>(cvoxelMapData.MapVoxels);
+
+            callback(new ChunkGenData
+            {
+                voxels = voxels,
+                chunkPos = chunkPos
+            });
+        }
+
+        #endregion
+
+        // TODO: compute chunk given existing ChunkGenData 
+        // no need to call PerlinMapGenKernel
 
         public IEnumerator compute(IntVector3 chunkPos, Action<Chunk> callback)
         {
@@ -177,6 +338,8 @@ namespace Mel.VoxelGen
         {
             cvoxelMapData.releaseTemporaryBuffers();
             cvoxelMapFormat.releaseTemporaryBuffers();
+            cvoxelNeighborFormat.Release();
+            cvoxelFaceCopy.Release();
         }
 
     }

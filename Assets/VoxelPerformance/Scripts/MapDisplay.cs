@@ -25,6 +25,44 @@ namespace VoxelPerformance
         [SerializeField]
         Transform emptyChunkMarker;
 
+        public struct LODArrays
+        {
+            public VoxelGeomDataMirror[][] lodArrays;
+
+            public static LODArrays Create()
+            {
+                return new LODArrays
+                {
+                    lodArrays = new VoxelGeomDataMirror[ChunkGenData.LODLevels][]
+                };
+            }
+
+            public int[] getLengths()
+            {
+                var result = new int[lodArrays.Length];
+                for(int i=0; i<result.Length; ++i)
+                {
+                    result[i] = lodArrays[i].Length;
+                }
+                return result;
+            }
+
+            public VoxelGeomDataMirror[] this[int i] {
+                get {
+                    return lodArrays[i];
+                }
+                set {
+                    lodArrays[i] = value;
+                }
+            }
+
+            public override string ToString()
+            {
+                return string.Format("LODArrays: LEN {0} ,{1}, {2}", lodArrays[0].Length, lodArrays[1].Length, lodArrays[2].Length);
+            }
+
+        }
+
         public class LODBuffers
         {
 

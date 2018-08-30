@@ -9,14 +9,16 @@ namespace Mel.VoxelGen
 {
     public static class BufferUtil
     {
-        public static void ReleaseBuffers(params ComputeBuffer[] buffers)
+        public static int ReleaseBuffers(params ComputeBuffer[] buffers)
         {
+            int count = 0;
             for(int i=0; i<buffers.Length; ++i)
             {
                 var buff = buffers[i];
-                if(buff != null) { buff.Release(); }
+                if(buff != null) { buff.Release(); count++; }
                 buffers[i] = null;
             }
+            return count;
         }
 
         public static IntVector3 GetThreadGroupSizes(ComputeShader shader, int kernel)

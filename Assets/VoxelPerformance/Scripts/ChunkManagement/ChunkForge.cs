@@ -7,15 +7,26 @@ using System.Collections;
 using Mel.ChunkManagement;
 using Mel.Math;
 using VoxelPerformance;
+using System.Threading.Tasks;
 
 namespace Mel.VoxelGen
 {
     public class ChunkForge : MonoBehaviour
     {
         [SerializeField]
-        ChunkCompute chunkCompute;
+        ChunkCompute _chunkCompute;
+        ChunkCompute chunkCompute {
+            get {
+                if(!_chunkCompute)
+                {
+                    _chunkCompute = Instantiate(_chunkCompute);
+                }
+                return _chunkCompute;
+            }
+        }
 
         Action<Chunk> OnChunksDone;
+        Action<ChunkGenData> OnChunkGenDataDone;
 
         [SerializeField]
         MapDisplay mapDisplayPrefab;
@@ -44,6 +55,51 @@ namespace Mel.VoxelGen
             return true;
         }
 
+        #region chunk-gen-data
+
+        
+
+        public bool ForgeChunkGenData(IntVector3 chunkPos, Action<ChunkGenData> callback)
+        {
+            if(Busy) { return false; }
+            OnChunkGenDataDone = callback;
+
+            if(vGenConfig.IsSerializedDataValid)
+            {
+                var data = SerializedChunkGenData.Read(chunkPos);
+                if(data != null)
+                {
+                    chunkGenDataDone(data);
+                    return true;
+                }
+            }
+            computeGenData(chunkPos);
+            return true;
+        }
+
+        void computeGenData(IntVector3 chunkPos)
+        {
+            chunkCompute.computeGenDataPleasePurgeMe(chunkPos, chunkGenDataDone);
+        }
+
+        void chunkGenDataDone(ChunkGenData dat)
+        {
+            Busy = false;
+            OnChunkGenDataDone(dat);
+        }
+
+        #endregion
+
+        #region chunk-from-gen-data
+
+        //public bool FromGenData(ChunkGenData data, Action<Chunk> callback)
+        //{
+        //    if(Busy) { return false; }
+
+        //}
+
+        #endregion
+
         private void _forge(IntVector3 chunkPos, Action<Chunk> callback)
         {
             Busy = true;
@@ -51,6 +107,7 @@ namespace Mel.VoxelGen
 
             if (vGenConfig.IsSerializedDataValid)
             {
+
                 SerializedChunk.ReadAsync(chunkPos, (SerializedChunk serChunk) =>
                 {
                     if (serChunk != null)
@@ -60,11 +117,13 @@ namespace Mel.VoxelGen
                         return;
                     }
 
+                    Debug.Log("got back null from read");
                     computeChunk(chunkPos);
                 });
             }
             else
             {
+                Debug.Log("ser data invalid");
                 computeChunk(chunkPos);
             }
 
@@ -77,10 +136,12 @@ namespace Mel.VoxelGen
             OnChunksDone = callback;
             if (vGenConfig.IsSerializedDataValid)
             {
+                Debug.Log("will read chunk: " + chunkPos);
                 SerializedChunk.ReadAsync(chunkPos, (SerializedChunk serChunk) =>
                 {
                     if (serChunk != null)
                     {
+                        Debug.Log("serchunk not null");
                         Chunk result = Chunk.FromSerializedChunk(serChunk, CreateMapDisplay(chunkPos));
                         chunksDone(result);
                         return;
@@ -89,6 +150,7 @@ namespace Mel.VoxelGen
                 });
             } else
             {
+                Debug.Log("ser data not valid");
                 chunksDone(null);
             }
             
@@ -96,7 +158,15 @@ namespace Mel.VoxelGen
 
         void computeChunk(IntVector3 chunkPos)
         {
-            if (!vGenConfig.DebugDontComputeChunks)
+            //
+            // Acutally let's avoid computing chunks in chunk forge
+            // only read them from disk
+
+            chunksDone(null);
+
+            //Don't want this
+            /*
+            if (!vGenConfig.DebugDontComputeChunksInDisplayPipeline)
             {
                 StartCoroutine(chunkCompute.compute(chunkPos, chunksDone));
             }
@@ -104,6 +174,7 @@ namespace Mel.VoxelGen
             {
                 chunksDone(null);
             }
+            */
         }
 
         //private void _UnPack(IntVector3 chunkPos, Action<Chunk> callback)

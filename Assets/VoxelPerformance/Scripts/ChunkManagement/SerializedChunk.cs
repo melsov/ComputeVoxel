@@ -54,14 +54,22 @@ namespace Mel.ChunkManagement
 
             //Write chunk
             WriteUintsToFile(Voxels, FileFullPath);
-            //using (BinaryWriter bw = new BinaryWriter(File.Open(FileFullPath, FileMode.Create)))
-            //{
-            //    foreach(int voxel in Voxels)
-            //    {
-            //        bw.Write(voxel);
-            //    }
-            //}
+ 
             
+        }
+
+        public static void WriteVoxelGeomDataToFile(VoxelGeomDataMirror[] data, string FilePath)
+        {
+            using (BinaryWriter w = new BinaryWriter(File.Open(FilePath, FileMode.Create)))
+            {
+                int len = data.Length;
+                int i;
+                for (i = 0; i < len; ++i)
+                {
+                    w.Write(data[i].voxel);
+                    w.Write(data[i].extras);
+                }
+            }
         }
 
         public static void WriteUintsToFile(uint[] uints, string FilePath)
@@ -95,6 +103,34 @@ namespace Mel.ChunkManagement
                 }
             }
 
+            file.Close();
+
+            return voxels;
+        }
+
+        public static VoxelGeomDataMirror[] ReadGeomDataFromFile(string FilePath)
+        {
+            FileStream file = File.Open(FilePath, FileMode.Open);
+            VoxelGeomDataMirror[] voxels;
+
+            using (BinaryReader br = new BinaryReader(file))
+            {
+                int pos = 0;
+                int length = (int)br.BaseStream.Length;
+                int sizeUint = System.Runtime.InteropServices.Marshal.SizeOf(new VoxelGeomDataMirror());
+                voxels = new VoxelGeomDataMirror[length / sizeUint];
+
+                while (pos * sizeUint < length)
+                {
+                    VoxelGeomDataMirror vg = new VoxelGeomDataMirror();
+                    vg.voxel = br.ReadUInt32();
+                    vg.extras = br.ReadUInt32();
+                    voxels[pos++] = vg;
+                }
+            }
+
+            file.Close();
+
             return voxels;
         }
 
@@ -115,7 +151,15 @@ namespace Mel.ChunkManagement
 
         public static void ReadAsync(IntVector3 chunkPos, Action<SerializedChunk> callback)
         {
+            /*
             if (!File.Exists(GetFileFullPath(chunkPos)))
+            {
+                Debug.Log("No file at" + chunkPos);
+                callback(null);
+                return;
+            }
+            */
+            if (!Chunk.MetaData.SavedChunkExists(chunkPos))
             {
                 callback(null);
                 return;
@@ -131,6 +175,7 @@ namespace Mel.ChunkManagement
 
                 if(metaData.isInvalid)
                 {
+                    Debug.Log("invalid meta data at: " + chunkPos);
                     callback(null);
                     return;
                 }
@@ -139,9 +184,9 @@ namespace Mel.ChunkManagement
 
                 var all = Allocator.TempJob;
                 dsbuffJob.path = new NativeArray<byte>(StringToBytes.ToBytes(GetDBufferFullPath(chunkPos)), all);
-                dsbuffJob.rLOD0 = new NativeArray<uint>(metaData.LODBufferLengths[0], all);
-                dsbuffJob.rLOD1 = new NativeArray<uint>(metaData.LODBufferLengths[1], all);
-                dsbuffJob.rLOD2 = new NativeArray<uint>(metaData.LODBufferLengths[2], all);
+                dsbuffJob.rLOD0 = new NativeArray<VoxelGeomDataMirror>(metaData.LODBufferLengths[0], all);
+                dsbuffJob.rLOD1 = new NativeArray<VoxelGeomDataMirror>(metaData.LODBufferLengths[1], all);
+                dsbuffJob.rLOD2 = new NativeArray<VoxelGeomDataMirror>(metaData.LODBufferLengths[2], all);
 
                 var jcb = jcbGO.AddComponent<JobCall>(); 
                 jcb.Schedule(dsbuffJob, () =>
@@ -153,7 +198,15 @@ namespace Mel.ChunkManagement
 
                     dsbuffJob.DisposeNArrays();
 
+
+                    uint[] voxelsFakeEmpty = new uint[1];
+                    callback(new SerializedChunk(chunkPos, dbuffers, voxelsFakeEmpty, metaData));
+
+                    /*
                     FileStream chunkFile = File.Open(GetFileFullPath(chunkPos), FileMode.Open);
+                    //
+                    // Maybe read the full voxel array later, as needed
+                    //
                     using (BinaryReader br = new BinaryReader(chunkFile))
                     {
                         int pos = 0;
@@ -165,6 +218,7 @@ namespace Mel.ChunkManagement
                         }
                         callback(new SerializedChunk(chunkPos, dbuffers, voxels, metaData));
                     }
+                    */
                     GameObject.Destroy(jcbGO);
 
                 });
@@ -355,9 +409,18 @@ namespace Mel.ChunkManagement
                 return dbuffers;
             }
 
+            public static void WriteLODArrays(MapDisplay.LODArrays lodArrays, IntVector3 chunkPos)
+            {
+                string path = GetDBufferFullPath(chunkPos);
+                for(int i = 0; i < ChunkGenData.LODLevels; ++i)
+                {
+                    WriteVoxelGeomDataToFile(lodArrays.lodArrays[i], FilePathForBuffer(path, i));
+                }
+            }
+
             public static void WriteBuffer(MapDisplay.LODBuffers dbuffers, string path)
             {
-                for(int i = 0; i < 3; ++i)
+                for(int i = 0; i < ChunkGenData.LODLevels; ++i)
                 {
                     WriteBuffAtIndex(dbuffers, path, i);
                 }
@@ -376,9 +439,12 @@ namespace Mel.ChunkManagement
             public struct DeserJob : IJob
             {
                 [ReadOnly] public NativeArray<byte> path;
-                public NativeArray<uint> rLOD0;
-                public NativeArray<uint> rLOD1;
-                public NativeArray<uint> rLOD2;
+                //
+                // TODO: convert to VoxelGeomDataMirror
+                //
+                public NativeArray<VoxelGeomDataMirror> rLOD0;
+                public NativeArray<VoxelGeomDataMirror> rLOD1;
+                public NativeArray<VoxelGeomDataMirror> rLOD2;
 
                 public void Execute()
                 {
@@ -388,9 +454,9 @@ namespace Mel.ChunkManagement
                     StreamReader reader = null;
                     try
                     {
-                        rLOD0.CopyFrom(ReadUintsFromFile(FilePathForBuffer(_path, 0))); 
-                        rLOD1.CopyFrom(ReadUintsFromFile(FilePathForBuffer(_path, 1)));
-                        rLOD2.CopyFrom(ReadUintsFromFile(FilePathForBuffer(_path, 2)));
+                        rLOD0.CopyFrom(ReadGeomDataFromFile (FilePathForBuffer(_path, 0))); 
+                        rLOD1.CopyFrom(ReadGeomDataFromFile(FilePathForBuffer(_path, 1)));
+                        rLOD2.CopyFrom(ReadGeomDataFromFile(FilePathForBuffer(_path, 2)));
                     } catch (Exception)
 
                     {

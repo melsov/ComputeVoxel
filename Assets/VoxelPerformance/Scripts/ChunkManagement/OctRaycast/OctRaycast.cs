@@ -41,7 +41,7 @@ namespace Mel.VoxelGen
         }
 
         int fake;
-        private List<Ray3f> rayStepsDebug;
+        public List<Ray3f> rayStepsDebug;
         private List<VoxelOctree<uint>.DBUGColorBounds> debugTraversal;
 
         private void Start()

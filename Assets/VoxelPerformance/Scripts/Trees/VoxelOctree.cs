@@ -171,9 +171,7 @@ namespace Mel.Trees
 
             }
 
-            //compiler relax
             return default(FlatVOTree<T>);
-            
         }
 
         public bool Set(T leaf, Vector3f pos)

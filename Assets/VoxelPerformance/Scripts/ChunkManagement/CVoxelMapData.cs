@@ -13,11 +13,39 @@ namespace Mel.VoxelGen
         public ComputeBuffer MapVoxelsLOD2 { get; private set; }
         public ComputeBuffer MapVoxelsLOD4 { get; private set; }
 
+        public ComputeBuffer ExistsMap { get; private set; }
+
+        public ComputeBuffer MapHeights { get; private set; }
+
         ComputeShader perlinGen;
         private VGenConfig vGenConfig;
         int PerlinMapGenKernel;
-
         int ClearMapBuffersKernel;
+
+        ComputeBuffer GetLOD(int i)
+        {
+            switch (i)
+            {
+                case 0: return MapVoxels;
+                case 1: return MapVoxelsLOD2;
+                case 2:return MapVoxelsLOD4;
+                default: return null;
+            }
+        }
+
+        public ChunkGenData CopyArrays()
+        {
+            ChunkGenData c =  new ChunkGenData();
+            for (int i = 0; i < ChunkGenData.LODLevels; ++i)
+            {
+                c[i] = CVoxelMapFormat.BufferCountArgs.GetData<VoxelGenDataMirror>(GetLOD(i));
+            }
+
+            c.ExistsMap = CVoxelMapFormat.BufferCountArgs.GetData<uint>(ExistsMap);
+
+            return c;
+        }
+
 
         public CVoxelMapData(ComputeShader shader, VGenConfig vGenConfig)
         {
@@ -39,10 +67,17 @@ namespace Mel.VoxelGen
             MapVoxels = new ComputeBuffer(vGenConfig.ChunkPerlinGenArraySize, sizeof(int));
             MapVoxelsLOD2 = new ComputeBuffer(vGenConfig.VoxelsPerChunk / 8 /* - V/64 */, sizeof(int));
             MapVoxelsLOD4 = new ComputeBuffer(vGenConfig.VoxelsPerChunk / 64, sizeof(int));
+            MapHeights = new ComputeBuffer(vGenConfig.ColumnFootprint.Area, sizeof(uint)); //TODO: actually use
+
+            ExistsMap = new ComputeBuffer(vGenConfig.SizeOfExistsMap, sizeof(int));
 
             perlinGen.SetBuffer(PerlinMapGenKernel, "MapVoxels", MapVoxels);
             perlinGen.SetBuffer(PerlinMapGenKernel, "MapVoxelsLOD2", MapVoxelsLOD2);
             perlinGen.SetBuffer(PerlinMapGenKernel, "MapVoxelsLOD4", MapVoxelsLOD4);
+
+            perlinGen.SetBuffer(PerlinMapGenKernel, "MapHeights", MapHeights);
+
+            perlinGen.SetBuffer(PerlinMapGenKernel, "ExistsMap", ExistsMap);
 
             perlinGen.SetBuffer(ClearMapBuffersKernel, "MapVoxels", MapVoxels);
             perlinGen.SetBuffer(ClearMapBuffersKernel, "MapVoxelsLOD2", MapVoxelsLOD2);
@@ -52,17 +87,7 @@ namespace Mel.VoxelGen
 
         public void releaseTemporaryBuffers()
         {
-            if (null != MapVoxels)
-                MapVoxels.Release();
-            MapVoxels = null;
-
-            if (null != MapVoxelsLOD2)
-                MapVoxelsLOD2.Release();
-            MapVoxelsLOD2 = null;
-
-            if (MapVoxelsLOD4 != null)
-                MapVoxelsLOD4.Release();
-            MapVoxelsLOD4 = null;
+            BufferUtil.ReleaseBuffers(MapVoxels, MapVoxelsLOD2, MapVoxelsLOD4, MapHeights, ExistsMap);
         }
 
         public void setMapOffset(IntVector3 mapoffset)

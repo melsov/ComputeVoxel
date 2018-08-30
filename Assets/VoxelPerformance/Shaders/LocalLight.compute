@@ -1,0 +1,6 @@
+// #pragma kernel LocalLight
+
+// #include "ChunkConstants.cginc"
+// #include "VoxelHelper.cginc"
+
+// RWStructuredBuffer<uint> ExistsMap27;

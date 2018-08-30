@@ -4,10 +4,13 @@
 // Values copied from VGenConfig
 // Use editor menu: MEL / Write Chunk CGInc to change them
 
+#define SIZE_OF_INT 32
 
 #define CHUNK_DIM_X 64
 #define CHUNK_DIM_Y 64
 #define CHUNK_DIM_Z 64
+
+#define CHUNK_SIZE (uint3(CHUNK_DIM_X, CHUNK_DIM_Y, CHUNK_DIM_Z))
 
 #define COLUMNS_PER_CHUNK 4096
 #define VOXELS_PER_CHUNK 262144
@@ -45,11 +48,11 @@
 #define TEST_SHAPE_NONE // Test shape?
 #define TEST_CHUNK_SELECT_ALL // Test chunk select?
 
-#define EmptyVoxel 0
 
 struct GeomVoxelData
 {
    uint voxel;
+   uint extras;
 };
 
 struct RevCastData
@@ -62,7 +65,11 @@ struct RevCastData
 #define BUFF_THREADS_X 64
 #define BUFF_THREADS_Y 1
 
-//#define FILL_CHUNK_EDGES
+#define FILL_CHUNK_EDGES
 
+#define EmptyVoxel 0
+
+#define SIZE_OF_EXISTSMAP 8192
+#define SIZE_OF_EXISTSMAP27 221184
 
 #endif

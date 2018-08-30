@@ -101,6 +101,7 @@ void ExposedVoxels(uint3 dtid : SV_DispatchThreadID)
 
 			)
 		{
+			//TODO: find voxels at e.g. x+1, y+1, z to calc. local light data
 
 			ShownVoxels[ShownVoxels.IncrementCounter()] = encodeVoxelPosition(voxelid, x, y, z); 
 

@@ -20,7 +20,9 @@ RWStructuredBuffer<uint> MapVoxels;
 RWStructuredBuffer<uint> MapVoxelsLOD2;
 RWStructuredBuffer<uint> MapVoxelsLOD4;
 
-// RWStructuredBuffer<int> MapHeights;
+RWStructuredBuffer<int> MapHeights;
+
+RWStructuredBuffer<uint> ExistsMap;
 
 
 #define ARBITRARY_SHIFT3 float3(0, 0, 0)
@@ -56,9 +58,13 @@ uint testShape(uint3 dtid)
 
 #ifdef TEST_SHAPE_SPHERE2C
 	float3 gpos = MapOffset + dtid;
-	float chunkRad = 4;
+	float chunkRad = 2;
 	gpos = abs(fmod(gpos, CHUNK_DIM_X * chunkRad) - CHUNK_DIM_X * chunkRad / 2);
 	return length(gpos) < (CHUNK_DIM_X * chunkRad / 2 * .8);
+#endif
+
+#ifdef TEST_SHAPE_FILLED
+	return 7;
 #endif
 
 }
@@ -94,48 +100,48 @@ void PerlinMapGen(uint3 dtid : SV_DispatchThreadID)
 	float n;
 	float inputSkew;
 	uint voxels = 0;
+	uint columnIndex = dtid.z * CHUNK_DIM_X + dtid.x;
 
 	for (int j = 0; j < 4; j++)
 	{
-#ifdef USE_TERRAIN_GEN
 
 		P3.y = MapOffset.y + dtid.y * 4 + j;
-		VoxelData vdata = Voxel(P3);
-		uint voxel = vdata.type;
-#else
 
-		P3.y = MapOffset.y + dtid.y * 4 + j - SEA_LEVEL; 
-		inputSkew = snoise(P3.xz / (NOISE_INPUT_DIVISOR.xz * .1) + 300000);
-		n = snoise((P3) / (NOISE_INPUT_DIVISOR - inputSkew * NOISE_INPUT_DIVISOR * .1) + ARBITRARY_SHIFT3);
-		n = P3.y / (BEDROCK_TO_MAX - SEA_LEVEL) + n;
-
-	#ifdef TEST_SHAPE_NONE
-
-		uint voxel = noiseToVoxel(n);
-
-	#else
+		#ifndef TEST_SHAPE_NONE
 
 		uint3 testCoord = dtid;
 		testCoord.y = testCoord.y * 4 + j;
 		uint voxel = testShape(testCoord); 
 
-	#endif
-#endif
+		#else
+
+		VoxelData vdata = Voxel(P3);
+		uint voxel = vdata.type;
+
+		#endif
+
+		//
+		// ExistsMap
+		//
+		uint3 local = dtid; 
+		local.y = local.y * 4 + j;
+		SetExists(ExistsMap, local.x, local.y, local.z, voxel != EmptyVoxel);
 
 		//
 		//Set LOD 2 and 4 data
 		//
 		if(voxel != EmptyVoxel) 
 		{
-			uint3 i3 = dtid;
-			i3.y = i3.y * 4 + j;
+			uint orig;
+			InterlockedMax(MapHeights[columnIndex], (uint) P3.y, orig);
+
 			int index;
 
-			index = getLODIndex(i3, 4);
-			MapVoxelsLOD4[index] = encodeVoxelPosition(voxel, i3); 
+			index = getLODIndex(local, 4);
+			MapVoxelsLOD4[index] = encodeVoxelPosition(voxel, local); 
 
-			index = getLODIndex(i3, 2);
-			MapVoxelsLOD2[index] = encodeVoxelPosition(voxel, i3);
+			index = getLODIndex(local, 2);
+			MapVoxelsLOD2[index] = encodeVoxelPosition(voxel, local);
 		}
 		//End LODs
 
@@ -144,7 +150,7 @@ void PerlinMapGen(uint3 dtid : SV_DispatchThreadID)
 		voxels += voxel;
 	}
 
-	MapVoxels[(dtid.z * CHUNK_DIM_Z + dtid.x)*MAP_DATA_DIM_Y + dtid.y] = voxels;
+	MapVoxels[columnIndex*MAP_DATA_DIM_Y + dtid.y] = voxels;
 }
 
 
@@ -156,6 +162,8 @@ void ClearMapBuffers(uint3 dtid : SV_DispatchThreadID)
 	MapVoxelsLOD2[getLODIndex(dtid, 1)] = EmptyVoxel;
 	MapVoxelsLOD4[getLODIndex(dtid, 2)] = EmptyVoxel;
 }
+
+
 
 
 //
